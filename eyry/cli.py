@@ -122,6 +122,30 @@ def cmd_status(cfg: Config, args) -> int:
     return 0
 
 
+def cmd_watch(cfg: Config, args) -> int:
+    """A live, refreshing dashboard: queue depths, store counts, recent scans."""
+    import time
+    try:
+        while True:
+            sys.stdout.write("\033[2J\033[H")  # clear screen, home cursor
+            up = "up" if _redis_ok(cfg.redis_url) else "DOWN"
+            print(f"eyry \u2014 {time.strftime('%Y-%m-%d %H:%M:%S')}    redis: {up}")
+            print("=" * 72)
+            if shutil.which("purser"):
+                r = _run(["purser", "stats", "--redis", cfg.redis_url])
+                print("queue  " + (r.stdout.strip() or r.stderr.strip()))
+            if shutil.which("rutt"):
+                r = _run(["rutt", "stats", "--dsn", cfg.dsn])
+                print("store  " + (r.stdout.strip() or r.stderr.strip()))
+                print("\nrecent activity (scan log):")
+                r = _run(["rutt", "scans", "--limit", "12", "--dsn", cfg.dsn])
+                print(r.stdout.rstrip() or r.stderr.strip())
+            print(f"\n(refreshing every {args.interval:g}s \u2014 ctrl-c to stop)")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        return 0
+
+
 def cmd_pipe_hosts(cfg: Config, args) -> int:
     """Hidden helper: read Foretop JSONL on stdin, LPUSH each .host to a queue."""
     import redis  # local import so `eyry` w/o redis still loads for --help
@@ -221,6 +245,10 @@ def build_parser() -> argparse.ArgumentParser:
     common(sub.add_parser("status", help="redis + queue + store status"))
     sub.add_parser("version", help="versions of eyry and components")
 
+    w = sub.add_parser("watch", help="live dashboard: queue depths, store counts, recent scans")
+    common(w)
+    w.add_argument("--interval", type=float, default=2.0, help="refresh seconds (default 2)")
+
     up = sub.add_parser("up", help="run the whole pipeline for a scope")
     common(up)
     up.add_argument("--scope", action="append", default=[],
@@ -238,7 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 _DISPATCH = {
     "doctor": cmd_doctor, "init": cmd_init, "status": cmd_status,
-    "version": cmd_version, "up": cmd_up,
+    "version": cmd_version, "up": cmd_up, "watch": cmd_watch,
 }
 
 
