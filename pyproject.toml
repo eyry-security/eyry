@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eyry"
+version = "0.1.0"
+description = "One CLI to run the Eyry recon suite together: discover, queue, probe, and store."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Eyry", email = "hello@eyry.io" }]
+keywords = ["recon", "bugbounty", "attack-surface", "orchestrator", "pipeline", "security"]
+dependencies = [
+    "redis>=5.0",
+]
+
+[project.urls]
+Homepage = "https://eyry.io"
+Repository = "https://github.com/eyry-security/eyry"
+
+[project.scripts]
+eyry = "eyry.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["eyry*"]
