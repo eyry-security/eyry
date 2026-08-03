@@ -143,11 +143,15 @@ def cmd_pipe_hosts(cfg: Config, args) -> int:
     return 0
 
 
-def _pipeline_stages(cfg: Config, scope: str) -> list[Stage]:
+def _pipeline_stages(cfg: Config, scopes: list[str], scope_file: str | None) -> list[Stage]:
     py = sys.executable
+    if scope_file:
+        scope_args = f"--scope-file {scope_file!r}"
+    else:
+        scope_args = " ".join(f"--scope {s!r}" for s in scopes)
     # discover: Foretop -> (record discovery in Rutt) + (enqueue hosts for probing)
     discover = (
-        f"foretop --scope {scope!r} "
+        f"foretop {scope_args} "
         f"| tee >(rutt ingest foretop - --dsn {cfg.dsn!r}) "
         f"| {py} -m eyry pipe-hosts --redis {cfg.redis_url!r} --queue {cfg.ingest_queue!r}"
     )
@@ -171,9 +175,13 @@ def _pipeline_stages(cfg: Config, scope: str) -> list[Stage]:
 
 
 def cmd_up(cfg: Config, args) -> int:
-    stages = _pipeline_stages(cfg, args.scope)
+    if not args.scope and not args.scope_file:
+        print("eyry: give --scope (repeatable) or --scope-file", file=sys.stderr)
+        return 2
+    stages = _pipeline_stages(cfg, args.scope, args.scope_file)
+    scope_desc = args.scope_file if args.scope_file else ", ".join(args.scope)
     if args.dry_run:
-        print(f"# eyry pipeline for scope {args.scope!r}")
+        print(f"# eyry pipeline for scope {scope_desc!r}")
         print(f"# redis={cfg.redis_url}  dsn={cfg.dsn}  tier={cfg.tier}\n")
         for st in stages:
             print(f"## {st.name}\n{st.command}\n")
@@ -187,7 +195,7 @@ def cmd_up(cfg: Config, args) -> int:
         print(f"eyry: redis not reachable at {cfg.redis_url}", file=sys.stderr)
         return 1
 
-    print(f"[eyry] pipeline up for scope {args.scope!r} — ctrl-c to stop", file=sys.stderr)
+    print(f"[eyry] pipeline up for scope {scope_desc!r} — ctrl-c to stop", file=sys.stderr)
     return Supervisor(stages).run()
 
 
@@ -215,7 +223,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     up = sub.add_parser("up", help="run the whole pipeline for a scope")
     common(up)
-    up.add_argument("--scope", required=True, help="scope to watch, e.g. '*.example.com'")
+    up.add_argument("--scope", action="append", default=[],
+                    help="scope to watch, e.g. '*.example.com' (repeatable)")
+    up.add_argument("--scope-file", help="file of scope patterns, one per line (e.g. a bug-bounty wildcard list)")
     up.add_argument("--tier", default=None, choices=["hot", "warm", "cold"])
     up.add_argument("--dry-run", action="store_true", help="print the pipeline and exit")
 

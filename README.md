@@ -46,6 +46,7 @@ export RUTT_DSN=postgresql:///rutt
 eyry doctor                      # are the tools + Redis + Postgres present?
 eyry init                        # create the Rutt schema
 eyry up --scope '*.example.com'  # run the whole pipeline (ctrl-c to stop)
+eyry up --scope-file scopes.txt  # ...or filter on a big scope list (bug-bounty wildcards)
 eyry status                      # queue depths + store counts, any time
 ```
 
