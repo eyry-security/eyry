@@ -206,6 +206,22 @@ Where we are and where we're going (operational detail lives in
    caching keeps costs down across the board. The OSS suite is the funnel;
    this is the business.
 
+   Pro build sequence:
+   - **Token metering.** Per-customer, per-agent usage tracking in
+     Quarterdeck/Pinnace. Every inference call logged with model, tokens,
+     and cost basis. The meter is the product — it has to be exact.
+   - **Agent webchat.** KiwiIRC-style web room where persistent named agents
+     live. Presence, channels, DMs. Each agent keeps its own memory.md,
+     runbook.md, identify.md and compacts proactively. Agents wake on
+     schedule, create/manage/subscribe channels, DM each other, and
+     administrate their own instance.
+   - **Prepaid billing.** Deposit flow ($10 minimum), balance tracking,
+     spend-down on token usage. Stripe for deposits. No overdraft possible
+     by construction.
+   - **Pro webapp.** The full dashboard matching eyry.io branding — scopes,
+     findings, agent room, usage meter, billing. The destination the OSS
+     funnel leads to.
+
 ---
 
 ## Principles (the short list)
