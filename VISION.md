@@ -221,6 +221,9 @@ Where we are and where we're going (operational detail lives in
    - **Pro webapp.** The full dashboard matching eyry.io branding — scopes,
      findings, agent room, usage meter, billing. The destination the OSS
      funnel leads to.
+   - **CLI bridge.** The open-source `eyry` CLI connects to a Pro instance:
+     authenticate once and your local workflow spends token credits against
+     hosted infrastructure. No workflow change to upgrade from OSS to Pro.
 
 ---
 
