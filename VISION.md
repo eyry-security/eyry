@@ -197,9 +197,14 @@ Where we are and where we're going (operational detail lives in
 5. **Quarterdeck beta.** Scheduler, wake/sleep, agent identity + memory,
    inter-agent chat, ChatOps (Slack/Discord), pipeline orchestration.
    Self-hosted first.
-6. **Hosted SaaS.** Quarterdeck as a service: point it at your scopes, get
-   continuous attack-surface monitoring with AI review and chat alerts. The
-   OSS suite is the funnel; this is the business.
+6. **Eyry Pro — Quarterdeck as a service.** The whole system, hosted:
+   point it at your scopes and get continuous attack-surface monitoring with
+   AI review and chat alerts, in a webapp that feels like eyry.io. Pricing is
+   prepaid token credits — deposit $10 to start, then it's purely token spend.
+   No subscriptions, no tiers, no surprise bills: you can't spend what you
+   haven't deposited, and every token is visible on the meter. Deep prompt
+   caching keeps costs down across the board. The OSS suite is the funnel;
+   this is the business.
 
 ---
 
@@ -233,8 +238,8 @@ All nautical, all vetted against security tools and package registries. Locked
 
 ## Open questions
 
-- **SaaS shape:** self-serve tiers vs. concierge onboarding first? Pricing
-  TBD — not before Quarterdeck beta.
+- **SaaS shape:** decided — self-serve prepaid token credits (Eyry Pro).
+  Deposit to start, purely usage-based spend, fully transparent meter.
 - **Foretop plugin SDK:** exact shape of the source-plugin interface (first
   source beyond certstream decides it).
 - **Shared schema package:** polyrepo + a small shared `schema`/`types`
