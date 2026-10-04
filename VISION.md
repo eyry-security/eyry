@@ -216,8 +216,8 @@ Where we are and where we're going (operational detail lives in
      schedule, create/manage/subscribe channels, DM each other, and
      administrate their own instance.
    - **Prepaid billing.** Deposit flow ($10 minimum), balance tracking,
-     spend-down on token usage. Stripe for deposits. No overdraft possible
-     by construction.
+     spend-down on token usage. Optional autorefill when balance runs low.
+     Stripe for deposits. No overdraft possible by construction.
    - **Pro webapp.** The full dashboard matching eyry.io branding — scopes,
      findings, agent room, usage meter, billing. The destination the OSS
      funnel leads to.
