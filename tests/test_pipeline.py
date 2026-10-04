@@ -184,3 +184,15 @@ def test_aplomado_is_optional():
 
 def test_required_components_unchanged():
     assert COMPONENTS == ["foretop", "purser", "vedette", "rutt"]
+
+
+# --------------------------------------------------------------------------- #
+# Foretop -> queue handoff
+# --------------------------------------------------------------------------- #
+
+def test_discover_requests_foretop_json():
+    """Foretop's default is bare hosts; both Eyry consumers require JSONL."""
+    with patch("eyry.cli.shutil.which", side_effect=lambda t: f"/usr/bin/{t}"):
+        stages = _pipeline_stages(_cfg(), ["*.example.com"], None, review=False)
+    discover = next(s for s in stages if s.name == "discover")
+    assert discover.command.startswith("foretop --json ")

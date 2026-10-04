@@ -183,7 +183,7 @@ def _pipeline_stages(cfg: Config, scopes: list[str], scope_file: str | None,
         scope_args = " ".join(f"--scope {s!r}" for s in scopes)
     # discover: Foretop -> (record discovery in Rutt) + (enqueue hosts for probing)
     discover = (
-        f"foretop {scope_args} "
+        f"foretop --json {scope_args} "
         f"| tee >(rutt ingest foretop - --dsn {cfg.dsn!r}) "
         f"| {py} -m eyry pipe-hosts --redis {cfg.redis_url!r} --queue {cfg.ingest_queue!r}"
     )
