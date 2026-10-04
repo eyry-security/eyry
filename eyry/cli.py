@@ -26,6 +26,7 @@ from .config import Config
 from .supervisor import Stage, Supervisor
 
 COMPONENTS = ["foretop", "purser", "vedette", "rutt"]
+OPTIONAL_COMPONENTS = ["aplomado"]  # checked by doctor, skipped if absent in up
 
 
 # --------------------------------------------------------------------------- #
@@ -64,21 +65,27 @@ def _tool_version(tool: str) -> str | None:
 
 def cmd_version(cfg: Config, args) -> int:
     print(f"eyry {__version__}")
-    for tool in COMPONENTS:
+    for tool in COMPONENTS + OPTIONAL_COMPONENTS:
         v = _tool_version(tool)
-        print(f"  {tool:8} {v if v else '- not found on PATH'}")
+        print(f"  {tool:12} {v if v else '- not found on PATH'}")
     return 0
 
 
 def cmd_doctor(cfg: Config, args) -> int:
     ok = True
-    print("tools:")
+    print("tools (required):")
     for tool in COMPONENTS:
         v = _tool_version(tool)
         mark = "ok" if v else "MISSING"
         if not v:
             ok = False
-        print(f"  [{mark:>7}] {tool:8} {v or 'not on PATH'}")
+        print(f"  [{mark:>7}] {tool:12} {v or 'not on PATH'}")
+
+    print("tools (optional):")
+    for tool in OPTIONAL_COMPONENTS:
+        v = _tool_version(tool)
+        mark = "ok" if v else "absent"
+        print(f"  [{mark:>7}] {tool:12} {v or 'not on PATH (AI review stage will be skipped)'}")
 
     print("services:")
     r_ok = _redis_ok(cfg.redis_url)
@@ -167,7 +174,8 @@ def cmd_pipe_hosts(cfg: Config, args) -> int:
     return 0
 
 
-def _pipeline_stages(cfg: Config, scopes: list[str], scope_file: str | None) -> list[Stage]:
+def _pipeline_stages(cfg: Config, scopes: list[str], scope_file: str | None,
+                     *, review: bool = True, event_sink: str | None = None) -> list[Stage]:
     py = sys.executable
     if scope_file:
         scope_args = f"--scope-file {scope_file!r}"
@@ -187,22 +195,45 @@ def _pipeline_stages(cfg: Config, scopes: list[str], scope_file: str | None) -> 
     # default), which streams straight into Rutt.
     probe = (
         f"vedette --redis {cfg.redis_url!r} --queue {cfg.probe_queue!r} "
-        f"| rutt ingest vedette - --dsn {cfg.dsn!r}"
+        f"| tee >(rutt ingest vedette - --dsn {cfg.dsn!r})"
     )
-    return [
+    stages = [
         Stage("discover", discover),
         Stage("queue", ingest),
         Stage("feed", feed),
         Stage("reap", reap),
-        Stage("probe", probe),
     ]
+
+    if review and shutil.which("aplomado"):
+        # review: Aplomado reads Vedette JSONL from the probe stage's stdout,
+        # scans each target, writes findings to Rutt, and emits events.
+        review_cmd = f"aplomado scan --rutt-dsn {cfg.dsn!r}"
+        if event_sink:
+            review_cmd += f" --event-sink {event_sink!r}"
+        # probe stage tees to both rutt ingest AND the aplomado review stage
+        probe_with_review = f"{probe} | {review_cmd}"
+        stages.append(Stage("probe+review", probe_with_review))
+    else:
+        # No aplomado: probe pipes directly into rutt ingest (original behavior).
+        probe_store_only = (
+            f"vedette --redis {cfg.redis_url!r} --queue {cfg.probe_queue!r} "
+            f"| rutt ingest vedette - --dsn {cfg.dsn!r}"
+        )
+        stages.append(Stage("probe", probe_store_only))
+        if review and not shutil.which("aplomado"):
+            print("[eyry] aplomado not found on PATH — AI review stage skipped",
+                  file=sys.stderr)
+
+    return stages
 
 
 def cmd_up(cfg: Config, args) -> int:
     if not args.scope and not args.scope_file:
         print("eyry: give --scope (repeatable) or --scope-file", file=sys.stderr)
         return 2
-    stages = _pipeline_stages(cfg, args.scope, args.scope_file)
+    stages = _pipeline_stages(cfg, args.scope, args.scope_file,
+                              review=not args.no_review,
+                              event_sink=args.event_sink)
     scope_desc = args.scope_file if args.scope_file else ", ".join(args.scope)
     if args.dry_run:
         print(f"# eyry pipeline for scope {scope_desc!r}")
@@ -256,6 +287,10 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--scope-file", help="file of scope patterns, one per line (e.g. a bug-bounty wildcard list)")
     up.add_argument("--tier", default=None, choices=["hot", "warm", "cold"])
     up.add_argument("--dry-run", action="store_true", help="print the pipeline and exit")
+    up.add_argument("--no-review", action="store_true",
+                    help="skip the Aplomado AI-review stage even if installed")
+    up.add_argument("--event-sink", default=None,
+                    help="write Aplomado scan events to this path (or '-' for stdout)")
 
     ph = sub.add_parser("pipe-hosts", help=argparse.SUPPRESS)
     ph.add_argument("--redis", default="redis://127.0.0.1:6379")
