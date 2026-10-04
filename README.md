@@ -89,7 +89,7 @@ yours resolved):
 
 ```sh
 # discover: Foretop records every new host in Rutt, and enqueues it for probing
-foretop --scope '*.example.com' \
+foretop --json --scope '*.example.com' \
   | tee >(rutt ingest foretop - --dsn $RUTT_DSN) \
   | eyry pipe-hosts --redis $EYRY_REDIS --queue purser:in
 
