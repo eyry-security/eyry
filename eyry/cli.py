@@ -185,7 +185,7 @@ def _pipeline_stages(cfg: Config, scopes: list[str], scope_file: str | None,
     discover = (
         f"foretop --json {scope_args} "
         f"| tee >(rutt ingest foretop - --dsn {cfg.dsn!r}) "
-        f"| {py} -m eyry pipe-hosts --redis {cfg.redis_url!r} --queue {cfg.ingest_queue!r}"
+        f"| eyry pipe-hosts --redis {cfg.redis_url!r} --queue {cfg.ingest_queue!r}"
     )
     # queue: dedup/prioritize, then feed the prober's list
     ingest = f"purser ingest --from {cfg.ingest_queue!r} --tier {cfg.tier} --redis {cfg.redis_url!r}"
