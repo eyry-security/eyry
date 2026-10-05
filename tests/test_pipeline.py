@@ -196,3 +196,39 @@ def test_discover_requests_foretop_json():
         stages = _pipeline_stages(_cfg(), ["*.example.com"], None, review=False)
     discover = next(s for s in stages if s.name == "discover")
     assert discover.command.startswith("foretop --json ")
+def test_pipe_hosts_enqueues_foretop_json(monkeypatch, capsys):
+    """A Foretop JSONL record reaches the configured probe-ingest queue."""
+    import io
+    import sys
+    from types import SimpleNamespace
+
+    from eyry.cli import cmd_pipe_hosts
+
+    pushed = []
+
+    class FakeClient:
+        def lpush(self, queue, host):
+            pushed.append((queue, host))
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(url, decode_responses):
+            assert url == "redis://smoke/15"
+            assert decode_responses is True
+            return FakeClient()
+
+    monkeypatch.setitem(sys.modules, "redis", FakeRedis)
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            '{"host":"127.0.0.1:5000","source":"certstream"}\n'
+            "not-json\n"
+            '{"source":"certstream"}\n'
+        ),
+    )
+
+    args = SimpleNamespace(redis="redis://smoke/15", queue="smoke:ingest")
+    assert cmd_pipe_hosts(_cfg(), args) == 0
+    assert pushed == [("smoke:ingest", "127.0.0.1:5000")]
+    assert "enqueued 1 host(s)" in capsys.readouterr().err
