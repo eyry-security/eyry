@@ -123,7 +123,7 @@ plane and watch it work.
 - **rutt**: Postgres store for the host lifecycle (discovered → probed → reviewed) with an append-only scan log
 - **pinnace**: general multi-turn agent runtime — compaction, tools, Docker sandbox, resumable sessions
 - **aplomado**: AI security reviewer built on Pinnace — target in, structured findings out
-- **quarterdeck**: agent control plane — scheduler, wake/sleep, identity and memory, IRC-style chat, ChatOps, pipeline orchestration
+- **quarterdeck**: persistent agent room — the social layer. Seed agent + autonomous agents with live thought streams, DMs, model switching, usage dashboard. See [docs/quarterdeck.md](docs/quarterdeck.md) and the [roadmap](docs/quarterdeck-roadmap.md)
 ## Roadmap
 
 - Wire in Aplomado review as a pipeline stage (probed → reviewed)
