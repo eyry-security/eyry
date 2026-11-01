@@ -57,6 +57,16 @@ eyry watch                       # live dashboard: queue depths, store counts, r
 eyry status                      # one-shot queue + store status, any time
 ```
 
+In an Eyry Pro agent sandbox, read the tenant's live records directly from the
+Pro SQLite store (set `EYRY_TENANT_UID`; `EYRY_PRO_DB` defaults to
+`/var/lib/eyry-pro/eyry_pro.db`):
+
+```sh
+eyry findings list --json        # this tenant's findings
+eyry findings show 42 --json     # one finding with its report sections
+eyry scans status --json         # latest scan per scope, live counts
+```
+
 `eyry up` starts every stage, connects them through Redis and Postgres, streams
 their logs into one place, and tears the whole thing down cleanly on Ctrl-C.
 See exactly what it will run, without running it:
@@ -75,11 +85,15 @@ eyry up --scope '*.example.com' --dry-run
 | `eyry status` | Redis health, Purser lane depths, Rutt row counts |
 | `eyry watch` | Live dashboard: status, refreshing every `--interval` seconds (default 2) |
 | `eyry version` | Versions of eyry and every component |
+| `eyry findings list` | Read tenant findings from the Eyry Pro database (`--scope`, `--status`, `--json`) |
+| `eyry findings show` | Read one finding with its full report sections (`--json`) |
+| `eyry scans status` | Latest scan per scope with live phase and source-table counts (`--scope`, `--json`) |
 | `eyry pipe-hosts` | Internal plumbing: read hostnames from stdin, push them onto a Redis list |
 
 Flags: `--redis` (env `EYRY_REDIS`), `--dsn` (env `RUTT_DSN` /
 `DATABASE_URL`). `up` takes `--scope` (repeatable), `--scope-file`,
-`--tier {hot,warm,cold}` (default `warm`), and `--dry-run`.
+`--tier {hot,warm,cold}` (default `warm`), and `--dry-run`. The Pro read
+commands require `EYRY_TENANT_UID` and open `EYRY_PRO_DB` read-only.
 
 ## What `up` actually runs
 

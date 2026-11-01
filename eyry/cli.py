@@ -17,11 +17,13 @@ import argparse
 import json
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
+import time
 from urllib.parse import urlparse
 
-from . import __version__
+from . import __version__, prodb
 from .config import Config
 from .supervisor import Stage, Supervisor
 
@@ -57,6 +59,89 @@ def _tool_version(tool: str) -> str | None:
         return None
     r = _run([tool, "--version"])
     return (r.stdout or r.stderr).strip() or "(present)"
+
+
+def _fmt_cell(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ",".join(map(str, value))
+    return str(value)
+
+
+def _print_table(rows: list[dict], columns: list[str], empty: str) -> None:
+    if not rows:
+        print(empty)
+        return
+    widths = {c: len(c) for c in columns}
+    table = []
+    for row in rows:
+        formatted = {c: _fmt_cell(row.get(c)) for c in columns}
+        for c in columns:
+            widths[c] = min(max(widths[c], len(formatted[c])), 48)
+        table.append(formatted)
+    print("  ".join(c.ljust(widths[c]) for c in columns))
+    print("  ".join("-" * widths[c] for c in columns))
+    for row in table:
+        print("  ".join(row[c][:widths[c]].ljust(widths[c]) for c in columns))
+    print(f"\n{len(rows)} row(s)")
+
+
+def _fmt_time(value) -> str:
+    try:
+        stamp = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if stamp <= 0:
+        return "-"
+    return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(stamp))
+
+
+def _print_finding(finding: dict) -> None:
+    print(f"finding #{finding.get('id')}  "
+          f"[{finding.get('severity') or 'info'}] {finding.get('status') or 'open'}")
+    print(f"  title:     {finding.get('title') or '-'}")
+    print(f"  host:      {finding.get('host') or '-'}")
+    print(f"  scope:     {finding.get('scope_pattern') or finding.get('scope_id') or '-'}")
+    print(f"  class:     {finding.get('vuln_class') or '-'}")
+    print(f"  source:    {finding.get('source') or '-'}")
+    print(f"  created:   {_fmt_time(finding.get('created_at'))}")
+    if finding.get("closed_reason"):
+        print(f"  closed:    {finding.get('closed_reason')}")
+
+    summary = finding.get("summary") or finding.get("detail") or ""
+    print("\nSummary\n-------")
+    print(str(summary).strip() or "Not recorded.")
+
+    print("\nReproduction steps\n------------------")
+    steps = finding.get("reproduction_steps") or []
+    if steps:
+        for index, step in enumerate(steps, 1):
+            print(f"{index}. {step}")
+    else:
+        print("Not recorded.")
+
+    print("\nImpact\n------")
+    print(str(finding.get("impact") or "").strip() or "Not recorded.")
+
+    print("\nEvidence\n--------")
+    evidence = finding.get("evidence") or []
+    if not evidence:
+        print("Not recorded.")
+    for item in evidence:
+        if isinstance(item, dict):
+            print(json.dumps(item, indent=2, ensure_ascii=False))
+        else:
+            print(str(item))
+
+    if finding.get("verify_evidence"):
+        print("\nVerification evidence\n---------------------")
+        print(finding["verify_evidence"])
+
+
+def _pro_command_error(exc: Exception) -> int:
+    print(f"eyry: {exc}", file=sys.stderr)
+    return 1
 
 
 # --------------------------------------------------------------------------- #
@@ -254,6 +339,82 @@ def cmd_up(cfg: Config, args) -> int:
     return Supervisor(stages).run()
 
 
+def cmd_findings(cfg: Config, args) -> int:
+    """Read tenant findings from the Eyry Pro SQLite store."""
+    try:
+        uid = prodb.tenant_uid()
+        with prodb.connect() as conn:
+            if args.findings_cmd == "list":
+                findings = prodb.list_findings(
+                    conn, uid, scope_id=args.scope, status=args.status)
+                if args.json:
+                    print(json.dumps(
+                        {"findings": findings, "count": len(findings)},
+                        ensure_ascii=False))
+                else:
+                    rows = [{
+                        "id": f.get("id"),
+                        "severity": f.get("severity"),
+                        "status": f.get("status"),
+                        "host": f.get("host"),
+                        "title": f.get("title"),
+                        "scope": f.get("scope_pattern") or f.get("scope_id"),
+                        "created": _fmt_time(f.get("created_at")),
+                    } for f in findings]
+                    _print_table(
+                        rows,
+                        ["id", "severity", "status", "host", "title", "scope",
+                         "created"],
+                        "(no findings)",
+                    )
+                return 0
+
+            finding = prodb.get_finding(conn, uid, args.finding_id)
+            if finding is None:
+                print(f"eyry: finding {args.finding_id} not found for this tenant",
+                      file=sys.stderr)
+                return 1
+            if args.json:
+                print(json.dumps(finding, ensure_ascii=False))
+            else:
+                _print_finding(finding)
+            return 0
+    except (prodb.ProDBError, sqlite3.Error) as exc:
+        return _pro_command_error(exc)
+
+
+def cmd_scans(cfg: Config, args) -> int:
+    """Show the latest tenant scan per scope from the Eyry Pro store."""
+    try:
+        uid = prodb.tenant_uid()
+        with prodb.connect() as conn:
+            result = prodb.scan_status(conn, uid, scope_id=args.scope)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
+        rows = [{
+            "scope": scan.get("scope_pattern") or scan.get("scope_id"),
+            "scan": scan.get("scan_id") or "-",
+            "status": scan.get("status") or "-",
+            "phase": scan.get("live_phase") or "-",
+            "findings": scan.get("findings_count", 0),
+            "resolved": scan.get("resolved_hosts", 0),
+            "reviewed": scan.get("reviewed_hosts", 0),
+            "updated": _fmt_time(scan.get("finished_at")
+                                 or scan.get("scan_created_at")),
+        } for scan in result["scopes"]]
+        _print_table(
+            rows,
+            ["scope", "scan", "status", "phase", "findings", "resolved",
+             "reviewed", "updated"],
+            "(no scopes)",
+        )
+        print(f"\nas of {result['as_of_iso']}")
+        return 0
+    except (prodb.ProDBError, sqlite3.Error) as exc:
+        return _pro_command_error(exc)
+
+
 # --------------------------------------------------------------------------- #
 # parser
 # --------------------------------------------------------------------------- #
@@ -280,6 +441,33 @@ def build_parser() -> argparse.ArgumentParser:
     common(w)
     w.add_argument("--interval", type=float, default=2.0, help="refresh seconds (default 2)")
 
+    findings = sub.add_parser(
+        "findings", help="read findings from the Eyry Pro database")
+    findings_sub = findings.add_subparsers(dest="findings_cmd", required=True)
+
+    fl = findings_sub.add_parser("list", help="list this tenant's findings")
+    fl.add_argument("--scope", type=int, metavar="ID",
+                    help="only findings for this scope id")
+    fl.add_argument("--status", metavar="S",
+                    help="only findings with this status")
+    fl.add_argument("--json", action="store_true",
+                    help="emit machine-readable JSON")
+
+    fs = findings_sub.add_parser(
+        "show", help="show one finding with its report sections")
+    fs.add_argument("finding_id", type=int)
+    fs.add_argument("--json", action="store_true",
+                    help="emit machine-readable JSON")
+
+    scans = sub.add_parser(
+        "scans", help="read scan status from the Eyry Pro database")
+    scans_sub = scans.add_subparsers(dest="scans_cmd", required=True)
+    ss = scans_sub.add_parser("status", help="latest scan per scope")
+    ss.add_argument("--scope", type=int, metavar="ID",
+                    help="only this scope id")
+    ss.add_argument("--json", action="store_true",
+                    help="emit machine-readable JSON")
+
     up = sub.add_parser("up", help="run the whole pipeline for a scope")
     common(up)
     up.add_argument("--scope", action="append", default=[],
@@ -302,6 +490,7 @@ def build_parser() -> argparse.ArgumentParser:
 _DISPATCH = {
     "doctor": cmd_doctor, "init": cmd_init, "status": cmd_status,
     "version": cmd_version, "up": cmd_up, "watch": cmd_watch,
+    "findings": cmd_findings, "scans": cmd_scans,
 }
 
 
