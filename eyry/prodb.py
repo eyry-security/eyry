@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -20,9 +21,10 @@ DEFAULT_DB = "/var/lib/eyry-pro/eyry_pro.db"
 
 FINDING_FIELDS = (
     "id", "scope_id", "host", "severity", "title", "detail", "vuln_class",
-    "status", "status_changed_at", "closed_reason", "verified_at",
-    "verify_evidence", "source", "origin_scan_id", "summary",
-    "reproduction_steps", "impact", "evidence", "created_at",
+    "class_slug", "status", "status_changed_at", "closed_reason",
+    "verified_at", "verify_evidence", "source", "origin_scan_id", "summary",
+    "reproduction_steps", "impact", "evidence", "occurrences", "last_seen",
+    "created_at",
 )
 
 SCAN_FIELDS = (
@@ -37,18 +39,30 @@ _FINDING_DEFAULTS = {
     "title": "",
     "detail": "",
     "vuln_class": "",
+    "class_slug": "",
+    "class_title": "",
     "status": "open",
     "status_changed_at": 0.0,
     "closed_reason": "",
     "verified_at": 0.0,
+    "verified": False,
     "verify_evidence": "",
     "source": "",
     "origin_scan_id": None,
     "summary": None,
     "reproduction_steps": [],
+    "reproduction_steps_raw": None,
     "impact": None,
+    "remediation": "",
     "evidence": [],
+    "evidence_raw": None,
+    "detail_sections": {},
+    "occurrences": 0,
+    "first_seen": 0.0,
+    "last_seen": 0.0,
+    "updated_at": 0.0,
     "created_at": 0.0,
+    "scope": "",
     "scope_pattern": "",
 }
 
@@ -119,12 +133,101 @@ def _json_array(raw) -> list:
     return value if isinstance(value, list) else []
 
 
-def _finding_record(row: sqlite3.Row) -> dict:
+_SECTION_RE = re.compile(
+    r"^\s*(summary|repro(?:duction)?(?:\s+steps)?|impact|remediation|"
+    r"evidence)\s*:\s*(.*)$", re.IGNORECASE)
+_SECTION_KEYS = {
+    "summary": "summary",
+    "repro": "reproduction_steps",
+    "reproduction": "reproduction_steps",
+    "reproduction steps": "reproduction_steps",
+    "impact": "impact",
+    "remediation": "remediation",
+    "evidence": "evidence",
+}
+
+
+def _detail_sections(detail) -> dict:
+    text = "" if detail is None else str(detail)
+    if not text.strip():
+        return {}
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        match = _SECTION_RE.match(line)
+        if match:
+            key = " ".join(match.group(1).lower().split())
+            current = _SECTION_KEYS.get(
+                key, "reproduction_steps" if key.startswith("repro") else key)
+            sections.setdefault(current, [])
+            remainder = match.group(2).strip()
+            if remainder:
+                sections[current].append(remainder)
+            continue
+        if current is not None:
+            sections[current].append(line)
+    parsed: dict = {}
+    for key, lines in sections.items():
+        value = "\n".join(lines).strip()
+        if not value:
+            continue
+        if key == "reproduction_steps":
+            parsed[key] = [line.strip() for line in value.splitlines()
+                           if line.strip()]
+        else:
+            parsed[key] = value
+    return parsed
+
+
+def _class_meta(conn: sqlite3.Connection, slug: str) -> tuple[str, str]:
+    if not slug:
+        return "", ""
+    try:
+        row = conn.execute(
+            "SELECT title, remediation FROM vuln_classes WHERE slug=?",
+            (slug,)).fetchone()
+    except sqlite3.Error:
+        return "", ""
+    if not row:
+        return "", ""
+    return str(row["title"] or ""), str(row["remediation"] or "")
+
+
+def _finding_record(row: sqlite3.Row,
+                    conn: sqlite3.Connection | None = None) -> dict:
     record = dict(row)
     for key, default in _FINDING_DEFAULTS.items():
         record.setdefault(key, default)
-    record["reproduction_steps"] = _json_array(record.get("reproduction_steps"))
-    record["evidence"] = _json_array(record.get("evidence"))
+    raw_repro = record.get("reproduction_steps")
+    raw_evidence = record.get("evidence")
+    sections = _detail_sections(record.get("detail"))
+    record["detail_sections"] = sections
+    record["reproduction_steps_raw"] = raw_repro
+    record["evidence_raw"] = raw_evidence
+    record["reproduction_steps"] = _json_array(raw_repro)
+    if not record["reproduction_steps"]:
+        record["reproduction_steps"] = list(
+            sections.get("reproduction_steps") or [])
+    record["evidence"] = _json_array(raw_evidence)
+    if not record["evidence"] and sections.get("evidence"):
+        record["evidence"] = [{
+            "kind": "detail", "label": "Evidence",
+            "content": sections["evidence"]}]
+    if not record.get("summary"):
+        record["summary"] = sections.get("summary") or ""
+    if not record.get("impact"):
+        record["impact"] = sections.get("impact") or ""
+    class_title, class_remediation = _class_meta(
+        conn, record.get("class_slug") or "")
+    record["class_title"] = class_title
+    record["remediation"] = (
+        sections.get("remediation") or class_remediation or "")
+    record["verified"] = bool(float(record.get("verified_at") or 0) > 0)
+    record["first_seen"] = record.get("created_at") or 0.0
+    record["last_seen"] = record.get("last_seen") or record.get("created_at")
+    record["updated_at"] = record["last_seen"] or record.get(
+        "status_changed_at") or 0.0
+    record["scope"] = record.get("scope_pattern") or ""
     return record
 
 
@@ -168,7 +271,7 @@ def list_findings(conn: sqlite3.Connection, uid: str,
         f" WHERE {where} ORDER BY {order}",
         params,
     ).fetchall()
-    return [_finding_record(row) for row in rows]
+    return [_finding_record(row, conn) for row in rows]
 
 
 def get_finding(conn: sqlite3.Connection, uid: str,
@@ -183,7 +286,7 @@ def get_finding(conn: sqlite3.Connection, uid: str,
         " WHERE f.firebase_uid=? AND f.id=?",
         (uid, finding_id),
     ).fetchone()
-    return _finding_record(row) if row else None
+    return _finding_record(row, conn) if row else None
 
 
 def _count(conn: sqlite3.Connection, sql: str, params: tuple) -> int:
